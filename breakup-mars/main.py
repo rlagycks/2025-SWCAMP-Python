@@ -52,6 +52,8 @@ except PermissionError:
 for i in range(len(mars_logs)):
     mars_logs[i]=mars_logs[i].strip('\n')
 
+print(mars_logs)
+
 for line in mars_logs:
     parts = line.split(',', 2)
     if len(parts) == 3:
