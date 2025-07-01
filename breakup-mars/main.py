@@ -20,15 +20,11 @@ mission_computer_main.log의 내용을 통해서 사고의 원인을 분석하�
 '''
 
 
-#시도 1 [::-1] 글자까지 뒤집히는건 생각 못함
-#접근 방식1 데이터를 readlines으로 리스트 형태로 줄별로 받고 이후 처리하는 방식
-#
-
 import os
 from datetime import datetime
+import json
 
 os.chdir(os.path.dirname(__file__))
-print('Hello mars')
 log_mars=[]
 stage_keywords = {
     '발사 준비 단계': ['initialization', 'checklist', 'check', 'online', 'established', 'secured', 'nominal'],
@@ -73,15 +69,16 @@ for timestamp, message in log_mars:
     if not matched:
         uncategorized_logs.append((timestamp, message))
 
-for stage, logs in categorized_logs.items():
-    if not logs:
-        continue
-    print('## ' + stage)
-    for timestamp, message in logs:
-        time_only = timestamp[11:16]
-        print(time_only + ' - ' + message)
-    print()
-
 #로그 역순으로 정렬 출력 -> 오름차순이 보장되어 있는 상태라 라인별로 뒤집어서 정렬함
 for line in reversed(mars_logs):
-    print(line.strip()) 
+    print(line.strip())
+
+#리스트 객체 -> 딕셔너리로 변환
+log_dict = {timestamp: message for timestamp, message in log_mars}
+print(log_dict)
+
+print('\n--------------------------\n')
+
+#딕셔너리 -> json 형태로 변환
+with open("mission_computer_main.json", "w", encoding="utf-8") as f:
+    json.dump(log_dict, f, ensure_ascii=False, indent=4)
