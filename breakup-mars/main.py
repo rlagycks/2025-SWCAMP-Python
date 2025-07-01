@@ -21,64 +21,40 @@ mission_computer_main.log의 내용을 통해서 사고의 원인을 분석하�
 
 
 import os
-from datetime import datetime
 import json
 
+# 현재 디렉터리 설정
 os.chdir(os.path.dirname(__file__))
-log_mars=[]
-stage_keywords = {
-    '발사 준비 단계': ['initialization', 'checklist', 'check', 'online', 'established', 'secured', 'nominal'],
-    '발사 시퀀스': ['countdown', 'ignition', 'thrust', 'Liftoff'],
-    '비행 중 주요 이벤트': ['max-Q', 'throttled', 'cutoff', 'separation', 'stage ignition', 'jettisoned'],
-    '궤도 진입 및 위성 배치': ['orbit', 'insertion', 'navigation', 'burn', 'deployment'],
-    '로켓 귀환 단계': ['deorbit', 'reentry', 'heat shield', 'parachutes', 'touchdown', 'recovery']
-}
 
+# 로그 파일 읽기
 try:
     with open('mission_computer_main.log', 'r', encoding='utf-8') as f:
-        mars_logs = f.readlines()
-
+        mars_logs = [line.strip() for line in f.readlines()]
 except FileNotFoundError:
-    print("로그 파일이 존재하지 않습니다.")
+    print('로그 파일이 존재하지 않습니다.')
     exit(1)
 except PermissionError:
-    print("로그 파일에 접근 권한이 없습니다.")
+    print('로그 파일에 접근 권한이 없습니다.')
     exit(1)
 
-for i in range(len(mars_logs)):
-    mars_logs[i]=mars_logs[i].strip('\n')
-
-print(mars_logs)
-
+# 로그 파싱 (timestamp, message만 추출)
+log_mars = []
 for line in mars_logs:
     parts = line.split(',', 2)
     if len(parts) == 3:
         timestamp, event, message = parts
-        log_mars.append((timestamp, message))
+        log_mars.append((timestamp.strip(), message.strip()))
 
-categorized_logs = {stage: [] for stage in stage_keywords}
-uncategorized_logs = []
+# 시간 역순 출력
+for timestamp, message in reversed(log_mars):
+    print(f'{timestamp}, {message}')
 
-for timestamp, message in log_mars:
-    matched = False
-    for stage, keywords in stage_keywords.items():
-        if any(keyword in message for keyword in keywords):
-            categorized_logs[stage].append((timestamp, message))
-            matched = True
-            break
-    if not matched:
-        uncategorized_logs.append((timestamp, message))
-
-#로그 역순으로 정렬 출력 -> 오름차순이 보장되어 있는 상태라 라인별로 뒤집어서 정렬함
-for line in reversed(mars_logs):
-    print(line.strip())
-
-#리스트 객체 -> 딕셔너리로 변환
+# 로그를 딕셔너리로 변환 후 JSON 저장
 log_dict = {timestamp: message for timestamp, message in log_mars}
-print(log_dict)
-
-print('\n--------------------------\n')
-
-#딕셔너리 -> json 형태로 변환
-with open("mission_computer_main.json", "w", encoding="utf-8") as f:
+with open('mission_computer_main.json', 'w', encoding='utf-8') as f:
     json.dump(log_dict, f, ensure_ascii=False, indent=4)
+
+# 로그에서 내용 검색
+for timestamp, message in log_dict.items():
+    if 'Oxygen' in message.lower():
+        print(f'{timestamp}: {message}')
