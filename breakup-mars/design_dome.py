@@ -1,5 +1,6 @@
 import numpy as np
 import glob
+import csv
 
 paths = glob.glob("question5/*.csv")
 CSVdata = []
@@ -11,15 +12,19 @@ for path in paths:
 
 merged = np.concatenate(CSVdata)
 
-part_key = '\ufeffparts'
-value_key = 'strength'
-
-unique_parts = np.unique(merged[part_key])
+unique_parts = np.unique(merged['\ufeffparts'])
 for part in unique_parts:
-    mask = merged[part_key] == part
-    values = merged[value_key][mask]
+    mask = merged['\ufeffparts'] == part
+    values = merged['strength'][mask]
     avg = np.mean(values)
     if avg<=50:
-        answer.append(avg)
+        answer.append((part,round(avg,2)))
 np.array(avg)
-np.savetxt("parts_to_work_on.csv", answer,delimiter=',', fmt="%.2f")
+with open("parts_to_work_on.csv", "w", newline='', encoding="utf-8") as f:
+    writer = csv.writer(f)
+    writer.writerow(["part", "avg_strength"])  # 헤더
+    writer.writerows(answer)
+
+parts2=np.genfromtxt(path,delimiter=',', dtype=str, encoding="utf-8", skip_header=1)
+parts3=parts2.T
+print(parts3)
