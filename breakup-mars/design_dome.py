@@ -1,30 +1,53 @@
-import numpy as np
-import glob
-import csv
+import math
 
-paths = glob.glob("question5/*.csv")
-CSVdata = []
-answer=[]
+material_result = ""
+diameter_result = 0
+thickness_result = 1
+area_result = 0
+weight_result = 0
 
-for path in paths:
-    arr = np.genfromtxt(path, delimiter=",", dtype=None, encoding="utf-8", names=True)
-    CSVdata.append(arr)
+material_density = {
+    "유리": 2.4,
+    "알루미늄": 2.7,
+    "탄소강": 7.85
+}
 
-merged = np.concatenate(CSVdata)
+def sphere_area(diameter, material="유리", thickness=1):
+    global material_result, diameter_result, thickness_result, area_result, weight_result
 
-unique_parts = np.unique(merged['\ufeffparts'])
-for part in unique_parts:
-    mask = merged['\ufeffparts'] == part
-    values = merged['strength'][mask]
-    avg = np.mean(values)
-    if avg<=50:
-        answer.append((part,round(avg,2)))
-np.array(avg)
-with open("parts_to_work_on.csv", "w", newline='', encoding="utf-8") as f:
-    writer = csv.writer(f)
-    writer.writerow(["part", "avg_strength"])  # 헤더
-    writer.writerows(answer)
+    radius = diameter / 2
+    area = 2 * math.pi * radius ** 2
+    volume_cm3 = area * (thickness / 100) * 1_000_000
 
-parts2=np.genfromtxt(path,delimiter=',', dtype=str, encoding="utf-8", skip_header=1)
-parts3=parts2.T
-print(parts3)
+    density = material_density.get(material, material_density["유리"])
+    mass_kg = (volume_cm3 * density) / 1000
+    weight_kg = mass_kg * 0.38
+
+    area = round(area, 3)
+    weight_kg = round(weight_kg, 3)
+
+    material_result = material
+    diameter_result = diameter
+    thickness_result = thickness
+    area_result = area
+    weight_result = weight_kg
+
+    print(f"재질 ⇒ {material_result}, 지름 ⇒ {diameter_result}, 두께 ⇒ {thickness_result}, 면적 ⇒ {area_result}, 무게 ⇒ {weight_result} kg")
+
+while True:
+    material = input("재질을 입력하세요 종료하려면 -1을 입력해주세요 (유리/알루미늄/탄소강): ").strip()
+    if material not in material_density:
+        if material=='-1':
+            break
+        print("잘못된 재질입니다. 유리, 알루미늄, 탄소강 중에서 선택해주세요.")
+        exit()
+
+    try:
+        diameter = float(input("지름을 입력하세요 (m): "))
+        if diameter < 0:
+            print("자연수 값을 입력해주세요.")
+            exit()
+    except ValueError:
+        print("지름은 숫자 형식으로 입력해야 합니다.")
+        exit()
+print('종료되었습니다')
