@@ -29,8 +29,14 @@ class MissionComputer:
     def __init__(self, sensor,setting_file='setting.txt'):
         self.sensor = sensor
         self.env_values = {}
-        self.settings = self.load_settings(setting_file)
+        try:
+            self.settings = self.load_settings(setting_file)
+        except FileNotFoundError:
+            print('파일을 찾을수 없습니다')
+        except Exception as e:
+            print(f"ERROR: {e}")
         self.computer_data = {}
+        self.get_mission_computer_info()
 
     def get_sensor_data(self):
         global stop_flag
@@ -42,12 +48,37 @@ class MissionComputer:
         print('Sytem stoped')
 
     def get_mission_computer_info_and_load(self):
-        self.print_selected_info()
+        result = {}
+        for key in self.settings:
+            func = self.computer_data.get(key)
+            if func is None:
+                result[key] = 'Unsupported key'
+            else:
+                try:
+                    result[key] = func() if callable(func) else func
+                except Exception as e:
+                    result[key] = f'ERROR: {e}'
+        print(json.dumps(result, indent=2))
 
     def print_selected_info(self):
         result = {key: self.computer_data.get(key, 'N/A') for key in self.settings}
         print('[Mission Computer Output]')
         print(json.dumps(result, indent=2))
+    
+    def get_mission_computer_info(self):
+        self.computer_data={
+            'os': platform.system,
+            'os_version': platform.version,
+            'cpu_type': platform.processor,
+            'cpu_cores': lambda: psutil.cpu_count(logical=False),
+            'memory_total': lambda: f"{psutil.virtual_memory().total // (1024 ** 2)} MB",
+            'cpu_usage': lambda: f"{psutil.cpu_percent(interval=1)} %",
+            'memory_usage': lambda: f"{psutil.virtual_memory().percent} %"
+        }
+    
+    def load_settings(self, setting_file):
+        with open(setting_file, 'r') as f:
+            return [line.strip() for line in f if line.strip()]
         
 def input_cheaker():
     global stop_flag
@@ -61,7 +92,9 @@ def input_cheaker():
 
 ds=DummySensor() 
 RunComputer=MissionComputer(ds)
+RunComputer.get_mission_computer_info_and_load()
 
+'''
 stop_flag = False
 
 thread2 = threading.Thread(target=RunComputer.get_sensor_data)
@@ -72,7 +105,7 @@ thread2.start()
 
 thread1.join()
 thread2.join()
-
+'''
 
 '''파이썬 코드를 사용해서 다음과 같은 미션 컴퓨터의 정보를 알아보는 메소드를 get_mission_computer_info() 라는 이름으로 만들고 문제 7에서 완성한 MissionComputer 클래스에 추가한다.
 
