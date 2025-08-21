@@ -4,6 +4,36 @@ import json
 import threading
 import platform
 import psutil
+import multiprocessing
+import signal
+import sys
+import termios
+import tty
+import select
+import os
+
+os.chdir(os.path.dirname(__file__))
+stop_event = threading.Event()
+
+def _sigint_handler(signum, frame):
+    stop_event.set()
+
+signal.signal(signal.SIGINT, _sigint_handler)
+
+def watch_q_key():
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    tty.setcbreak(fd)
+    try:
+        while not stop_event.is_set():
+            r, _, _ = select.select([sys.stdin], [], [], 1)
+            if r:
+                ch = sys.stdin.read(1)
+                if ch.lower() == 'q':
+                    stop_event.set()
+                    break
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 class DummySensor:
     def __init__(self):
@@ -24,104 +54,102 @@ class DummySensor:
 
     def get_env(self):
         return self.env_values
-    
+
 class MissionComputer:
-    def __init__(self, sensor,setting_file='setting.txt'):
+    def __init__(self, sensor, setting_file='setting.txt'):
         self.sensor = sensor
-        self.env_values = {}
         try:
-            self.settings = self.load_settings(setting_file)
+            self.settings = self._load_settings(setting_file)
         except FileNotFoundError:
-            print('파일을 찾을수 없습니다')
+            print(f"설정 파일을 찾을 수 없습니다: {setting_file}")
+            self.settings = []
         except Exception as e:
-            print(f"ERROR: {e}")
-        self.computer_data = {}
-        self.get_mission_computer_info()
+            print(f"설정 로드 중 오류: {e}")
+            self.settings = []
+        self._init_computer_data()
 
-    def get_sensor_data(self):
-        global stop_flag
-        while not stop_flag:
-            self.sensor.set_env()
-            self.env_values = self.sensor.get_env()
-            print(json.dumps(self.env_values, indent=2))
-            time.sleep(5)
-        print('Sytem stoped')
+    def _load_settings(self, setting_file):
+        with open(setting_file, 'r') as f:
+            return [line.strip() for line in f if line.strip()]
 
-    def get_mission_computer_info_and_load(self):
-        result = {}
-        for key in self.settings:
-            func = self.computer_data.get(key)
-            if func is None:
-                result[key] = 'Unsupported key'
-            else:
-                try:
-                    result[key] = func() if callable(func) else func
-                except Exception as e:
-                    result[key] = f'ERROR: {e}'
-        print(json.dumps(result, indent=2))
-
-    def print_selected_info(self):
-        result = {key: self.computer_data.get(key, 'N/A') for key in self.settings}
-        print('[Mission Computer Output]')
-        print(json.dumps(result, indent=2))
-    
-    def get_mission_computer_info(self):
-        self.computer_data={
+    def _init_computer_data(self):
+        self.computer_data = {
             'os': platform.system,
             'os_version': platform.version,
             'cpu_type': platform.processor,
             'cpu_cores': lambda: psutil.cpu_count(logical=False),
-            'memory_total': lambda: f"{psutil.virtual_memory().total // (1024 ** 2)} MB",
+            'memory_total': lambda: f"{psutil.virtual_memory().total // (1024**2)} MB",
             'cpu_usage': lambda: f"{psutil.cpu_percent(interval=1)} %",
             'memory_usage': lambda: f"{psutil.virtual_memory().percent} %"
         }
+
+    def get_mission_computer_info_once(self):
+        keys = ['os', 'os_version', 'cpu_type', 'cpu_cores', 'memory_total']
+        result = {
+            k: (self.computer_data[k]() if callable(self.computer_data[k]) else self.computer_data[k])
+            for k in keys
+        }
+        print('[Info ]', json.dumps(result, indent=2))
+
+    def get_mission_computer_load_once(self):
+        keys = ['cpu_usage', 'memory_usage']
+        result = {k: self.computer_data[k]() for k in keys}
+        print('[Load ]', json.dumps(result, indent=2))
+
+    def get_sensor_data(self):
+        while not stop_event.is_set():
+            self.sensor.set_env()
+            vals = self.sensor.get_env()
+            print('[Sensor]', json.dumps(vals, indent=2))
+            time.sleep(5)
+
+def info_loop(mc: MissionComputer):
+    while not stop_event.is_set():
+        try:
+            mc.get_mission_computer_info_once()
+        except Exception as e:
+            print("Info 에러:", e)
+        time.sleep(20)
+
+def load_loop(mc: MissionComputer):
+    while not stop_event.is_set():
+        try:
+            mc.get_mission_computer_load_once()
+        except Exception as e:
+            print("Load 에러:", e)
+        time.sleep(20)
+
+def start_mc(instance_id: int):
+    ds = DummySensor()
+    mc = MissionComputer(ds)
+
+    threads = [
+        threading.Thread(target=info_loop, args=(mc,), daemon=True),
+        threading.Thread(target=load_loop, args=(mc,), daemon=True),
+        threading.Thread(target=mc.get_sensor_data, daemon=True),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+if __name__ == '__main__':
+    # 'q' 키 감시 스레드 띄우기
+    threading.Thread(target=watch_q_key, daemon=True).start()
+
+    # 3개 독립 프로세스 생성
+    processes = []
+    for i in (1, 2, 3):
+        p = multiprocessing.Process(target=start_mc, args=(i,))
+        p.start()
+        processes.append(p)
+
+    # 자식 프로세스 완료 대기
+    for p in processes:
+        p.join()
+
+    print("모든 MissionComputer 프로세스가 종료되었습니다.")
+
+    '''
     
-    def load_settings(self, setting_file):
-        with open(setting_file, 'r') as f:
-            return [line.strip() for line in f if line.strip()]
-        
-def input_cheaker():
-    global stop_flag
-    while True:
-        cmd = input("종료하려면 'q' 입력: \n")
-        if cmd.strip().lower() == 'q':
-            stop_flag = True
-            break
-
-
-
-ds=DummySensor() 
-RunComputer=MissionComputer(ds)
-RunComputer.get_mission_computer_info_and_load()
-
-'''
-stop_flag = False
-
-thread2 = threading.Thread(target=RunComputer.get_sensor_data)
-thread1 = threading.Thread(target=input_cheaker)
-
-thread1.start()
-thread2.start()
-
-thread1.join()
-thread2.join()
-'''
-
-'''파이썬 코드를 사용해서 다음과 같은 미션 컴퓨터의 정보를 알아보는 메소드를 get_mission_computer_info() 라는 이름으로 만들고 문제 7에서 완성한 MissionComputer 클래스에 추가한다.
-
-- 필요한 미션 컴퓨터의 시스템 정보
-운영체계
-운영체계 버전
-CPU의 타입
-CPU의 코어 수
-메모리의 크기
-get_mission_computer_info()에 가져온 시스템 정보를 JSON 형식으로 출력하는 코드를 포함한다.
-미션 컴퓨터의 부하를 가져오는 코드를 get_mission_computer_load() 메소드로 만들고 MissionComputer 클래스에 추가한다
-get_mission_computer_load() 메소드의 경우 다음과 같은 정보들을 가져 올 수 있게한다.
-CPU 실시간 사용량
-메모리 실시간 사용량
-get_mission_computer_load()에 해당 결과를 JSON 형식으로 출력하는 코드를 추가한다.
-get_mission_computer_info(), get_mission_computer_load()를 호출해서 출력이 잘되는지 확인한다.
-MissionComputer 클래스를 runComputer 라는 이름으로 인스턴스화 한다.
-runComputer 인스턴스의 get_mission_computer_info(), get_mission_computer_load() 메소드를 호출해서 시스템 정보에 대한 값을 출력 할 수 있도록 한다.
-최종적으로 결과를 mars_mission_computer.py 에 저장한다'''
+    '''

@@ -44,7 +44,7 @@ for line in mars_logs:
     if len(parts) == 3:
         timestamp, event, message = parts
         log_mars.append((timestamp.strip(), message.strip()))
-
+print (log_mars)
 # 시간 역순 출력
 for timestamp, message in reversed(log_mars):
     print(f'{timestamp}, {message}')

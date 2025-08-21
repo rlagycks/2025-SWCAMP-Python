@@ -22,7 +22,7 @@ for line in mars_logs[1:]:
         record = dict(zip(header, values))
         inventory.append(record)
 
-inventory.sort(key=lambda x: float(x['Flammability']))
+inventory.sort(key=lambda x: float(x['Flammability']), reverse=True)
 
 flammable_items = [item for item in inventory if float(item['Flammability']) >= 0.7]
 for item in flammable_items:
