@@ -2,103 +2,129 @@
 # door_hacking.py
 
 import zipfile
-import zlib
-import multiprocessing
 import time
 import string
+import multiprocessing
 import os
-from multiprocessing import Value, Queue, Process
+import zlib
 
-os.chdir(os.path.dirname(__file__))
-ZIP_PATH = 'emergency_storage_key.zip'
-PASSWORD_FILE = 'password.txt'
-CHUNK_FACTOR = 6  # 청크 분할 계수
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ZIP_PATH = os.path.join(SCRIPT_DIR, 'emergency_storage_key.zip')
+PASSWORD_FILE = os.path.join(SCRIPT_DIR, 'password.txt')
 
+CHARSET = string.digits + string.ascii_lowercase
+PASSWORD_LENGTH = 6
 
-def idx_to_password(idx: int) -> str:
-    chars = string.digits + string.ascii_lowercase
-    base = len(chars)
-    pwd = []
-    for _ in range(6):
-        idx, rem = divmod(idx, base)
-        pwd.append(chars[rem])
-    return ''.join(reversed(pwd))
+def generate_password(index: int) -> str:
+    """정수 인덱스를 기반으로 6자리 비밀번호를 생성합니다."""
+    base = len(CHARSET)
+    password_chars = []
+    
+    temp_index = index
+    for _ in range(PASSWORD_LENGTH):
+        temp_index, remainder = divmod(temp_index, base)
+        password_chars.append(CHARSET[remainder])
+    
+    return "".join(reversed(password_chars))
 
-
-def worker(start_idx: int, end_idx: int, found_flag: Value, result_q: Queue):
+def worker(start_idx: int, end_idx: int, found_flag: multiprocessing.Value, result_q: multiprocessing.Queue, start_time: float):
+    """
+    각 프로세스가 실행할 작업 함수.
+    주어진 범위 내의 인덱스를 암호로 변환하여 암호 풀기를 시도합니다.
+    """
     try:
-        zf = zipfile.ZipFile(ZIP_PATH)
+        zip_file = zipfile.ZipFile(ZIP_PATH)
+        first_file_in_zip = zip_file.namelist()[0]
+    except FileNotFoundError:
+        print(f"[Worker {os.getpid()}] 오류: ZIP 파일 '{ZIP_PATH}'을(를) 찾을 수 없습니다.")
+        return
     except Exception as e:
-        print(f"[Worker {start_idx}] ZIP 열기 실패: {e}", flush=True)
+        print(f"[Worker {os.getpid()}] 오류: ZIP 파일을 여는 중 문제 발생 - {e}")
         return
 
-    attempts = 0
-    log_interval = 100_000  # 테스트용 로그 간격 (필요시 조정)
-
+    attempts_in_worker = 0
     for idx in range(start_idx, end_idx):
-        # 1,000회마다만 플래그 확인
-        if idx % 1000 == 0 and found_flag.value:
-            break
+        if idx % 1000 == 0:
+            if found_flag.value:
+                break
 
-        pwd = idx_to_password(idx)
-        attempts += 1
+        password = generate_password(idx)
+        attempts_in_worker += 1
 
         try:
-            # 메모리상에서 첫 파일만 읽어서 검사
-            first = zf.namelist()[0]
-            zf.read(first, pwd=pwd.encode())
-            # 성공
-            found_flag.value = True
-            result_q.put(pwd)
+            zip_file.read(first_file_in_zip, pwd=password.encode('utf-8'))
+            
+            with found_flag.get_lock():
+                found_flag.value = True
+            result_q.put(password)
+            
+            elapsed_time = time.time() - start_time
+            print(f"\n[Worker {os.getpid()}] 암호 발견! 시도 횟수: {attempts_in_worker}회, 진행 시간: {elapsed_time:.2f}초")
             break
+            
         except (RuntimeError, zlib.error, zipfile.BadZipFile):
-            pass
+            continue
+        except Exception as e:
+            print(f"[Worker {os.getpid()}] 암호 시도 중 예외 발생: {e}")
+            continue
+            
+    zip_file.close()
 
-        if attempts % log_interval == 0:
-            elapsed = time.time() - START_TIME.value
-            print(f"[Worker {start_idx}] {attempts}회 시도, 경과: {elapsed:.1f}s", flush=True)
-
-    zf.close()
-
-
-def save_password(pwd: str):
+def unlock_zip():
+    start_time = time.time()
+    total_passwords = len(CHARSET) ** PASSWORD_LENGTH
+    
     try:
-        with open(PASSWORD_FILE, 'w') as f:
-            f.write(pwd)
-        print(f"✔ 비밀번호 '{pwd}'를 '{PASSWORD_FILE}'에 저장했습니다.")
-    except Exception as e:
-        print(f"비밀번호 저장 실패: {e}")
+        cpu_count = multiprocessing.cpu_count()
+    except NotImplementedError:
+        cpu_count = 4
+
+    chunk_size = total_passwords // cpu_count
+    found_flag = multiprocessing.Value('b', False)
+    result_q = multiprocessing.Queue()
+
+    print("--- 암호 해독 시작 ---")
+    print(f"시작 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"총 시도할 암호 수: {total_passwords:,}개")
+    print(f"워커 프로세스 수: {cpu_count}개")
+    print("---------------------\n")
+
+    processes = []
+    for i in range(cpu_count):
+        start_index = i * chunk_size
+        end_index = (i + 1) * chunk_size if i < cpu_count - 1 else total_passwords
+        
+        process = multiprocessing.Process(target=worker, args=(start_index, end_index, found_flag, result_q, start_time))
+        processes.append(process)
+        process.start()
+
+    for process in processes:
+        process.join()
+
+    end_time = time.time()
+    total_elapsed_time = end_time - start_time
+
+    if not result_q.empty():
+        found_password = result_q.get()
+        print("\n--- 결과 ---")
+        print(f"암호 해독 성공!")
+        print(f"찾은 암호: {found_password}")
+        print(f"총 소요 시간: {total_elapsed_time:.2f}초")
+        
+        try:
+            with open(PASSWORD_FILE, 'w', encoding='utf-8') as f:
+                f.write(found_password)
+            print(f"암호를 '{PASSWORD_FILE}' 파일에 성공적으로 저장했습니다.")
+        except IOError as e:
+            print(f"오류: 암호 파일 저장에 실패했습니다 - {e}")
+    else:
+        print("\n--- 결과 ---")
+        print(f" 암호 해독 실패. (총 소요 시간: {total_elapsed_time:.2f}초)")
 
 
 if __name__ == '__main__':
-    TOTAL = 36 ** 6
-    cpu_count = multiprocessing.cpu_count()
-    chunk_size = (TOTAL + cpu_count * CHUNK_FACTOR - 1) // (cpu_count * CHUNK_FACTOR)
-
-    found_flag = Value('b', False, lock=False)
-    result_q = Queue()
-    START_TIME = Value('d', time.time(), lock=False)
-
-    processes = []
-    for i in range(cpu_count * CHUNK_FACTOR):
-        start = i * chunk_size
-        end = min(start + chunk_size, TOTAL)
-        if start >= end:
-            break
-        p = Process(target=worker, args=(start, end, found_flag, result_q))
-        processes.append(p)
-        p.start()
-
-    for p in processes:
-        p.join()
-
-    password = None
-    if not result_q.empty():
-        password = result_q.get()
-
-    if password:
-        elapsed = time.time() - START_TIME.value
-        print(f"\n🎉 비밀번호를 찾았습니다: '{password}' (총 경과 {elapsed:.1f}s)")
-        save_password(password)
+    if not os.path.exists(ZIP_PATH):
+        print(f"오류: '{ZIP_PATH}' 파일을 찾을 수 없습니다.")
+        print("스크립트와 동일한 폴더에 암호화된 zip 파일을 위치시켜 주세요.")
     else:
-        print("\n❌ 비밀번호를 찾지 못했습니다.")
+        unlock_zip()
