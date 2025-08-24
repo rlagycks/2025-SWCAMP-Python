@@ -8,173 +8,233 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
+class CalculatorLogic:
+    """
+    계산기의 모든 상태와 연산 로직을 담당하는 클래스.
+    UI와 독립적으로 동작합니다.
+    """
+    def __init__(self):
+        self.reset()
+
+    def add(self, a, b):
+        return a + b
+
+    def subtract(self, a, b):
+        return a - b
+
+    def multiply(self, a, b):
+        return a * b
+
+    def divide(self, a, b):
+        if b == 0:
+            return "Error"
+        return a / b
+
+    def reset(self):
+        """모든 상태를 초기화합니다."""
+        self.current_input = '0'
+        self.first_operand = None
+        self.operator = None
+        self.waiting_for_second_operand = False
+        self.calculation_finished = False # 계산 완료 상태 플래그
+
+    def input_digit(self, digit):
+        """숫자 입력을 처리합니다."""
+        if self.calculation_finished:
+            self.reset() # 계산 후 새 숫자 입력 시 초기화
+
+        if self.waiting_for_second_operand:
+            self.current_input = digit
+            self.waiting_for_second_operand = False
+        else:
+            if self.current_input == '0':
+                self.current_input = digit
+            else:
+                self.current_input += digit
+
+    def input_decimal(self):
+        """소수점 입력을 처리합니다."""
+        if self.calculation_finished:
+            self.reset()
+        if '.' not in self.current_input:
+            self.current_input += '.'
+
+    def negative_positive(self):
+        """음수/양수 전환을 처리합니다."""
+        if self.current_input != '0':
+            if self.current_input.startswith('-'):
+                self.current_input = self.current_input[1:]
+            else:
+                self.current_input = '-' + self.current_input
+        self.calculation_finished = False
+
+    def percent(self):
+        """퍼센트 계산을 처리합니다."""
+        try:
+            value = float(self.current_input) / 100
+            self.current_input = self._format_result(value)
+        except ValueError:
+            self.current_input = "Error"
+        self.calculation_finished = False
+
+    def set_operator(self, op):
+        """연산자 입력을 처리합니다."""
+        if self.operator and not self.waiting_for_second_operand:
+            self.equal()
+        
+        try:
+            self.first_operand = float(self.current_input)
+            self.operator = op
+            self.waiting_for_second_operand = True
+            self.calculation_finished = False
+        except ValueError:
+            self.current_input = "Error"
+            
+    def equal(self):
+        """'=' 버튼 또는 연속된 연산자 입력 시 계산을 수행합니다."""
+        if self.operator is None or self.waiting_for_second_operand:
+            return
+
+        try:
+            second_operand = float(self.current_input)
+            result = 0
+            
+            op_map = {
+                '+': self.add,
+                '-': self.subtract,
+                '×': self.multiply,
+                '÷': self.divide
+            }
+            
+            result = op_map[self.operator](self.first_operand, second_operand)
+
+            if result == "Error":
+                self.current_input = "Error"
+            else:
+                self.current_input = self._format_result(result)
+
+            self.first_operand = result if result != "Error" else None
+            self.operator = None
+            self.calculation_finished = True
+
+        except (ValueError, TypeError):
+            self.current_input = "Error"
+            self.operator = None
+
+    def _format_result(self, value):
+        """계산 결과를 디스플레이 형식에 맞게 변환합니다."""
+        if abs(value) > 1e15 or (abs(value) < 1e-6 and value != 0):
+             return f"{value:.6e}"
+        
+        if value == int(value):
+            return str(int(value))
+        else:
+            return str(round(value, 6))
+
+
 class Calculator(QWidget):
     """
-    아이폰 스타일의 계산기 UI를 만드는 클래스.
-    실제 계산 기능은 제외하고 UI와 버튼 입력 처리만 구현합니다.
+    계산기 UI를 생성하고 CalculatorLogic과 연결하여 상호작용을 처리합니다.
     """
     def __init__(self):
         super().__init__()
+        self.logic = CalculatorLogic()
         self.init_ui()
 
     def init_ui(self):
         """UI의 기본 설정과 레이아웃을 초기화합니다."""
         self.setWindowTitle('iPhone Calculator')
-        self.setGeometry(300, 300, 400, 600) # 윈도우 위치와 크기 설정
-        self.setStyleSheet("background-color: #1c1c1c;") # 전체 배경색을 어둡게 설정
+        self.setGeometry(300, 300, 400, 600)
+        self.setStyleSheet("background-color: #1c1c1c;")
 
-        # --- 위젯 생성 ---
-        # 숫자와 결과가 표시될 디스플레이 라인
         self.display = QLineEdit()
-        self.display.setReadOnly(True) # 읽기 전용으로 설정
-        self.display.setAlignment(Qt.AlignmentFlag.AlignRight) # 텍스트 오른쪽 정렬
+        self.display.setReadOnly(True)
+        self.display.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.display.setFixedHeight(100)
-        # 디스플레이 스타일 설정
         self.display.setStyleSheet("""
-            background-color: #1c1c1c;
-            color: white;
-            font-size: 70px;
-            border: none;
-            padding-right: 10px;
+            background-color: #1c1c1c; color: white; font-size: 70px;
+            border: none; padding-right: 10px;
         """)
         self.display.setFont(QFont("Helvetica", 45, QFont.Weight.Light))
         self.display.setText("0")
 
-        # --- 그리드 레이아웃 설정 ---
         grid = QGridLayout()
-        grid.setSpacing(10) # 버튼 사이의 간격
+        grid.setSpacing(10)
 
-        # 아이폰 계산기 버튼 레이아웃 정의
-        # (텍스트, 행, 열, 행병합, 열병합)
         buttons = [
             ('AC', 0, 0), ('+/-', 0, 1), ('%', 0, 2), ('÷', 0, 3),
             ('7', 1, 0), ('8', 1, 1), ('9', 1, 2), ('×', 1, 3),
             ('4', 2, 0), ('5', 2, 1), ('6', 2, 2), ('-', 2, 3),
             ('1', 3, 0), ('2', 3, 1), ('3', 3, 2), ('+', 3, 3),
-            ('0', 4, 0, 1, 2), ('.', 4, 2), ('=', 4, 3) # 0 버튼은 2칸 차지
+            ('0', 4, 0, 1, 2), ('.', 4, 2), ('=', 4, 3)
         ]
 
-        # --- 위젯을 레이아웃에 추가 ---
-        grid.addWidget(self.display, 0, 0, 1, 4) # 디스플레이는 첫 행에 4칸을 차지
+        grid.addWidget(self.display, 0, 0, 1, 4)
 
         for btn_text, row, col, *span in buttons:
             button = QPushButton(btn_text)
-            
-            # '0' 버튼의 너비를 다른 버튼의 2배 + 간격으로 설정
             if btn_text == '0':
                 button.setFixedSize(170, 80)
             else:
-                button.setFixedSize(80, 80) # 나머지 버튼 크기 고정
-
+                button.setFixedSize(80, 80)
             button.setFont(QFont("Helvetica", 24))
             
-            # 버튼 종류에 따라 스타일 적용
             if btn_text in ('AC', '+/-', '%'):
-                button.setStyleSheet("""
-                    QPushButton { background-color: #a5a5a5; color: black; border-radius: 40px; }
-                    QPushButton:pressed { background-color: #d9d9d9; }
-                """)
+                button.setStyleSheet("QPushButton { background-color: #a5a5a5; color: black; border-radius: 40px; } QPushButton:pressed { background-color: #d9d9d9; }")
             elif btn_text in ('÷', '×', '-', '+', '='):
-                button.setStyleSheet("""
-                    QPushButton { background-color: #f1a33c; color: white; border-radius: 40px; }
-                    QPushButton:pressed { background-color: #f9c78b; }
-                """)
-            else: # 숫자 버튼
-                button.setStyleSheet("""
-                    QPushButton { background-color: #333333; color: white; border-radius: 40px; }
-                    QPushButton:pressed { background-color: #737373; }
-                """)
-
-            # 버튼 클릭 시 이벤트 처리 함수 연결
+                button.setStyleSheet("QPushButton { background-color: #f1a33c; color: white; border-radius: 40px; } QPushButton:pressed { background-color: #f9c78b; }")
+            else:
+                button.setStyleSheet("QPushButton { background-color: #333333; color: white; border-radius: 40px; } QPushButton:pressed { background-color: #737373; }")
+            
             button.clicked.connect(self.button_clicked)
-
-            if span: # 버튼이 여러 칸을 차지하는 경우 (e.g., '0' 버튼)
+            if span:
                 grid.addWidget(button, row + 1, col, span[0], span[1])
             else:
                 grid.addWidget(button, row + 1, col)
-
         self.setLayout(grid)
 
     def button_clicked(self):
-        """버튼이 클릭되었을 때 호출되는 이벤트 핸들러입니다."""
+        """UI 버튼 클릭을 감지하고 로직 클래스의 해당 메소드를 호출합니다."""
         button = self.sender()
         key = button.text()
-        current_text = self.display.text()
-        operators = ['÷', '×', '-', '+']
 
-        # 1. AC (초기화) 처리
-        if key == 'AC':
-            self.display.setText('0')
+        if self.logic.current_input == "Error" and key != 'AC':
             return
 
-        # 2. +/- 부호 변경 처리
-        if key == '+/-':
-            # 마지막 연산자의 위치를 찾음
-            last_op_index = -1
-            for op in operators:
-                last_op_index = max(last_op_index, current_text.rfind(op))
+        if key.isdigit():
+            self.logic.input_digit(key)
+        elif key == '.':
+            self.logic.input_decimal()
+        elif key in ('÷', '×', '-', '+'):
+            self.logic.set_operator(key)
+        elif key == '=':
+            self.logic.equal()
+        elif key == 'AC':
+            self.logic.reset()
+        elif key == '+/-':
+            self.logic.negative_positive()
+        elif key == '%':
+            self.logic.percent()
+        
+        self.update_display()
 
-            # 연산자 이후의 숫자 부분을 가져옴
-            number_part = current_text[last_op_index + 1:]
-            
-            if number_part and float(number_part) != 0: # 숫자 부분이 있고 0이 아닐 때만
-                if number_part.startswith('-'):
-                    # 음수면 양수로
-                    new_number_part = number_part[1:]
-                else:
-                    # 양수면 음수로
-                    new_number_part = '-' + number_part
-                
-                # 전체 텍스트를 재구성
-                new_text = current_text[:last_op_index + 1] + new_number_part
-                self.display.setText(new_text)
-            return
-
-        # 3. = (결과) 처리
-        if key == '=':
-            # 마지막 글자가 연산자이거나 소수점이면 계산하지 않음
-            if current_text and (current_text[-1] in operators or current_text[-1] == '.'):
-                return
-            # (실제 계산 로직은 여기에 추가)
-            # 지금은 아무것도 하지 않음
-            return
-
-        # 4. 연산자 입력 처리
-        if key in operators:
-            # 마지막 글자가 연산자라면 새 연산자로 교체
-            if current_text and current_text[-1] in operators:
-                self.display.setText(current_text[:-1] + key)
-            # 마지막 글자가 소수점이라면 입력 무시
-            elif current_text and current_text[-1] == '.':
-                return
-            else:
-                self.display.setText(current_text + key)
-            return
-
-        # 5. 소수점 입력 처리
-        if key == '.':
-            # 현재 입력 중인 숫자에 이미 소수점이 있는지 확인
-            last_op_index = -1
-            for op in operators:
-                last_op_index = max(last_op_index, current_text.rfind(op))
-            
-            number_part = current_text[last_op_index + 1:]
-            
-            if '.' not in number_part:
-                self.display.setText(current_text + key)
-            return
-
-        # 6. 숫자 입력 처리
-        if current_text == '0' and key != '.':
-            self.display.setText(key)
+    def update_display(self):
+        """로직의 현재 상태를 기반으로 디스플레이를 업데이트합니다."""
+        # 연산자가 활성화되어 있고 두 번째 피연산자를 기다리는 상태일 때
+        if self.logic.operator and self.logic.waiting_for_second_operand:
+            display_text = f"{self.logic._format_result(self.logic.first_operand)} {self.logic.operator}"
+        # 연산자가 활성화되어 있고 두 번째 피연산자를 입력 중일 때
+        elif self.logic.operator and self.logic.first_operand is not None:
+            display_text = f"{self.logic._format_result(self.logic.first_operand)} {self.logic.operator} {self.logic.current_input}"
+        # 그 외의 모든 경우 (첫 숫자 입력, 계산 완료 등)
         else:
-            self.display.setText(current_text + key)
+            display_text = self.logic.current_input
+        
+        self.display.setText(display_text)
 
 
 def main():
     """메인 실행 함수"""
-    # PyQt6 라이브러리가 설치되어 있는지 확인합니다.
-    # 설치 명령어: pip install PyQt6
     app = QApplication(sys.argv)
     calc = Calculator()
     calc.show()
